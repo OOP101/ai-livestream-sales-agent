@@ -1,0 +1,50 @@
+[
+  {
+    "category": "promotion",
+    "title": "限时促销话术",
+    "content": "家人们注意了！这款商品今天直播间专属价，比平时便宜很多！库存有限，拍到就是赚到！倒计时3、2、1，上链接！",
+    "scenario": "限时促销、库存紧张时使用",
+    "trigger_keywords": ["多少钱", "便宜", "优惠", "折扣", "活动"],
+    "effectiveness_score": 0.92
+  },
+  {
+    "category": "promotion",
+    "title": "紧迫感话术",
+    "content": "刚刚后台显示已经卖出去很多件了！还剩最后几件，犹豫的家人们赶紧下手，等会儿没了可别后悔哦！",
+    "scenario": "库存即将售罄时使用",
+    "trigger_keywords": ["还有吗", "库存", "卖完", "没了"],
+    "effectiveness_score": 0.88
+  },
+  {
+    "category": "question",
+    "title": "产品功能解答",
+    "content": "这个问题问得好！让我来详细给大家介绍一下。很多买过的家人都反馈说效果非常好，您可以放心入手！",
+    "scenario": "观众询问产品功能时使用",
+    "trigger_keywords": ["怎么用", "功能", "效果", "质量", "好不好"],
+    "effectiveness_score": 0.85
+  },
+  {
+    "category": "price",
+    "title": "价格解释话术",
+    "content": "有家人问为什么这么便宜？因为我们是品牌直发，省去了中间商的差价！今天直播间的价格是全网最低的！",
+    "scenario": "观众对价格有疑虑时使用",
+    "trigger_keywords": ["为什么便宜", "正品吗", "质量", "太贵"],
+    "effectiveness_score": 0.90
+  },
+  {
+    "category": "negative",
+    "title": "差评安抚话术",
+    "content": "非常抱歉给您带来不好的体验！请您联系我们的客服，我们会第一时间为您处理。您的反馈我们非常重视！",
+    "scenario": "收到负面评价时使用",
+    "trigger_keywords": ["差", "不好", "失望", "退款", "骗人"],
+    "effectiveness_score": 0.78
+  },
+  {
+    "category": "interaction",
+    "title": "互动引导话术",
+    "content": "觉得主播讲得好的扣1！想要这款产品的扣2！让我看看有多少家人想要今天的福利！",
+    "scenario": "需要提升直播间互动时使用",
+    "trigger_keywords": ["互动", "扣1", "想要", "支持"],
+    "effectiveness_score": 0.82
+  }
+]

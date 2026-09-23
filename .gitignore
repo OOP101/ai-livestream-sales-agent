@@ -1,0 +1,48 @@
+# ============ 凭据与环境变量（严禁提交）============
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# ============ 抖音登录态 / 浏览器数据（含 Cookie、手机号，280MB+）============
+douyin_browser/
+douyin_state.json
+douyin_sync_cooldown.json
+**/douyin_browser/
+**/douyin_state.json
+**/douyin_sync_cooldown.json
+
+# ============ 数据库 / 向量库 ============
+*.db
+*.sqlite
+*.sqlite3
+chroma_data/
+**/chroma_data/
+
+# ============ Python ============
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ============ Node ============
+node_modules/
+dist/
+.vite/
+*.local
+
+# ============ 日志 ============
+*.log
+logs/
+
+# ============ 求职材料（仅本地留存，不公开）============
+docs/简历面试/
+
+# ============ 编辑器 / 系统 ============
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

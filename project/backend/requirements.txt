@@ -1,0 +1,17 @@
+# 本地部署可用范围（原文档锁定 2023 年底版本，在当前 PyPI 上依赖无解；原始锁定清单见 requirements.doc-pinned.txt）
+fastapi>=0.115,<0.200
+uvicorn[standard]>=0.30
+websockets>=12.0
+sqlalchemy>=2.0.30
+aiosqlite>=0.20
+pydantic>=2.7
+pydantic-settings>=2.3
+langchain>=0.3,<0.4
+langchain-openai>=0.2,<0.4
+langchain-community>=0.3,<0.4
+langgraph>=0.2,<0.4
+chromadb>=0.5.5,<0.6
+tiktoken>=0.7
+python-dotenv>=1.0
+httpx>=0.27
+playwright>=1.40
