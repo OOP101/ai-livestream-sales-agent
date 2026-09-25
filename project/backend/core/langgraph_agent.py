@@ -4,13 +4,16 @@ LangGraph Agent 工作流编排 - 系统核心
 将弹幕分析流程拆解为多个节点，通过状态机编排：
 接收弹幕 → 预处理 → 意图识别 → RAG检索 → 话术生成 → 策略推荐
 """
-from typing import TypedDict, Annotated, List, Dict, Any, Optional
-from langgraph.graph import StateGraph, END
 import json
+import logging
+from typing import TypedDict, Annotated, List, Dict, Any, Optional
 from datetime import datetime
-from core.danmaku_analyzer import analyzer
+from langgraph.graph import StateGraph, END
+from core.danmaku_analyzer import analyzer, VALID_INTENTS
 from core.rag_engine import rag_engine
 from core.script_recommender import script_recommender
+
+logger = logging.getLogger(__name__)
 
 
 # ============ 状态定义 ============
@@ -35,6 +38,7 @@ class AgentState(TypedDict):
     final_result: Dict[str, Any]      # 最终结果
     timestamp: str                    # 时间戳
     errors: List[str]                 # 错误信息
+    degraded: bool                    # 是否发生了降级（有节点失败但流程继续）
 
 
 # ============ 节点函数 ============
@@ -51,7 +55,12 @@ async def preprocess_node(state: AgentState) -> AgentState:
 
 
 async def intent_analysis_node(state: AgentState) -> AgentState:
-    """意图识别节点：使用 LLM 分析弹幕意图和情感"""
+    """意图识别节点：使用 LLM 分析弹幕意图和情感
+
+    失败时仍降级为默认值以保证流程跑完，但**不再静默**：错误记入 errors
+    并标记 degraded，否则 LLM 整体不可用时前端只会看到一片「其他/中性」，
+    根本无从判断是模型挂了还是真的没识别出来。
+    """
     try:
         result = await analyzer.analyze_intent(state["cleaned_content"])
         state["intent"] = result.get("intent", "other")
@@ -60,7 +69,9 @@ async def intent_analysis_node(state: AgentState) -> AgentState:
         state["sentiment_score"] = result.get("sentiment_score", 0.5)
         state["keywords"] = result.get("keywords", [])
     except Exception as e:
+        logger.exception("意图识别节点失败，降级为默认值")
         state["errors"].append(f"意图识别失败: {str(e)}")
+        state["degraded"] = True
         state["intent"] = "other"
         state["intent_confidence"] = 0.3
         state["sentiment"] = "neutral"
@@ -72,7 +83,9 @@ async def intent_analysis_node(state: AgentState) -> AgentState:
 async def rag_retrieval_node(state: AgentState) -> AgentState:
     """RAG 检索节点：根据意图类型检索相关知识"""
     try:
-        intent = state["intent"]
+        # analyzer 已把 intent 收敛到白名单内，这里再做一层兜底，
+        # 防止上游被替换后传入未知意图导致检索到错误的文档类型
+        intent = state["intent"] if state["intent"] in VALID_INTENTS else "other"
         content = state["cleaned_content"]
         if intent == "question":
             docs = await rag_engine.retrieve(content, doc_type="product", top_k=5)
@@ -83,7 +96,9 @@ async def rag_retrieval_node(state: AgentState) -> AgentState:
         state["rag_docs"] = docs
         state["rag_sources"] = [{"title": d.get("metadata", {}).get("title", ""), "score": d.get("score", 0)} for d in docs]
     except Exception as e:
+        logger.exception("RAG 检索节点失败")
         state["errors"].append(f"RAG检索失败: {str(e)}")
+        state["degraded"] = True
         state["rag_docs"] = []
         state["rag_sources"] = []
     return state
@@ -101,7 +116,9 @@ async def script_generation_node(state: AgentState) -> AgentState:
         state["script_category"] = state["intent"]
         state["rag_sources"] = result.get("rag_sources", state["rag_sources"])
     except Exception as e:
+        logger.exception("话术生成节点失败")
         state["errors"].append(f"话术生成失败: {str(e)}")
+        state["degraded"] = True
         state["recommended_script"] = "请稍后，正在为您生成推荐话术..."
         state["script_category"] = state["intent"]
     return state
@@ -118,7 +135,9 @@ async def strategy_node(state: AgentState) -> AgentState:
         state["strategy"] = strategy
         state["priority"] = strategy.get("priority", "low")
     except Exception as e:
+        logger.exception("策略生成节点失败")
         state["errors"].append(f"策略生成失败: {str(e)}")
+        state["degraded"] = True
         state["strategy"] = {"action": "正常推荐", "tips": ""}
         state["priority"] = "medium"
     return state
@@ -138,7 +157,9 @@ async def output_node(state: AgentState) -> AgentState:
         "strategy": state["strategy"],
         "priority": state["priority"],
         "timestamp": state["timestamp"],
-        "errors": state["errors"]
+        "errors": state["errors"],
+        # 前端可据此提示「本次结果经过降级」，避免把默认值当成真实分析
+        "degraded": state.get("degraded", False),
     }
     return state
 
@@ -181,6 +202,7 @@ class LivestreamAgent:
             "sentiment": "", "sentiment_score": 0.0, "keywords": [], "rag_docs": [],
             "rag_sources": [], "recommended_script": "", "script_category": "",
             "strategy": {}, "priority": "", "final_result": {}, "timestamp": "", "errors": [],
+            "degraded": False,
         }
         result = await self.graph.ainvoke(initial_state)
         return result.get("final_result", {})

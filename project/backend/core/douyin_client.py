@@ -10,13 +10,17 @@
 """
 import asyncio
 import json
+import logging
 import random
 import re
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Response
+
+logger = logging.getLogger(__name__)
 
 # 后端根目录（core/ 的上一级）
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -27,6 +31,9 @@ USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # 冷却文件（记录上次同步时间）
 COOLDOWN_FILE = BACKEND_DIR / "data" / "douyin_sync_cooldown.json"
+
+# 弹幕去重集合上限：只保留最近这么多条用于判重，防止长场次内存无上限增长
+SEEN_LIMIT = 5000
 
 # 登录态快照文件（storage_state 保存的 cookie，用于重启后判断登录状态）
 STATE_FILE = BACKEND_DIR / "data" / "douyin_state.json"
@@ -52,8 +59,9 @@ def _get_last_sync_time() -> float:
         if COOLDOWN_FILE.exists():
             data = json.loads(COOLDOWN_FILE.read_text(encoding="utf-8"))
             return float(data.get("last_sync", 0))
-    except Exception:
-        pass
+    except (json.JSONDecodeError, OSError, TypeError, ValueError) as e:
+        # 冷却文件损坏不影响主功能，按「从未同步」处理即可，但记一笔便于排查
+        logger.warning("同步冷却文件读取失败，按未同步处理：%s", e)
     return 0.0
 
 
@@ -64,8 +72,9 @@ def _set_last_sync_time():
             json.dumps({"last_sync": time.time()}, ensure_ascii=False),
             encoding="utf-8",
         )
-    except Exception:
-        pass
+    except OSError as e:
+        # 写不进去只会退化成「冷却不生效」，不影响采集本身
+        logger.warning("同步冷却文件写入失败（本次冷却将不生效）：%s", e)
 
 
 def get_cooldown_remaining() -> int:
@@ -410,7 +419,9 @@ class DouyinClient:
                 return out;
             }
         """
-        seen: set = set()
+        # 去重集合要有上限：长场次弹幕上万条，无上限会持续吃内存。
+        # 用 OrderedDict 当有界 FIFO 集合，淘汰最旧的记录。
+        seen: "OrderedDict[str, None]" = OrderedDict()
         while self._capturing and self._capture_page:
             if self._capture_page.is_closed():
                 # 直播间页面被手动关闭，结束采集
@@ -424,7 +435,9 @@ class DouyinClient:
                     t = t.strip()
                     if not t or t in seen:
                         continue
-                    seen.add(t)
+                    seen[t] = None
+                    if len(seen) > SEEN_LIMIT:
+                        seen.popitem(last=False)
                     if "：" in t:
                         user, content = t.split("：", 1)
                     elif ":" in t:

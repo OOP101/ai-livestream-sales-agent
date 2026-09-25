@@ -21,7 +21,7 @@ start.bat
 
 # 或手动
 cd backend && .venv\Scripts\python.exe main.py      # http://127.0.0.1:8000/docs
-cd frontend && npm run dev                          # http://localhost:5173
+cd frontend && npm run dev                          # http://localhost:5178
 ```
 
 `.env` 由 `backend/.env.example` 复制而来。关键项：

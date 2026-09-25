@@ -9,6 +9,13 @@
 from typing import List
 from core.config import settings
 
+# 各后端初始化失败时的排查提示（维度不同，切 provider 需重建向量库）
+_PROVIDER_HINT = {
+    "api": "检查 EMBEDDING_API_KEY / EMBEDDING_BASE_URL / EMBEDDING_MODEL 是否可用",
+    "local_bge": "检查 EMBEDDING_LOCAL_MODEL 指向的模型目录是否存在，或先下载该模型",
+    "chroma_default": "检查 chromadb 与 onnxruntime 是否安装完整（首次运行需联网下载 ONNX 模型）",
+}
+
 
 class _ApiEmbedding:
     """OpenAI 兼容接口"""
@@ -54,10 +61,29 @@ class _ChromaDefaultEmbedding:
 
 
 def get_embedding_backend():
-    """按配置返回 embedding 后端实例"""
+    """按配置返回 embedding 后端实例
+
+    初始化失败时抛出带「怎么修」的明确错误，而不是让 transformers / openai
+    的原始堆栈把真正原因埋掉。
+
+    注意：不同后端的向量维度不同（API 通常 1536 维，chroma_default 384 维），
+    切换 EMBEDDING_PROVIDER 后必须重建向量库，否则检索结果无意义。
+    """
     provider = (settings.EMBEDDING_PROVIDER or "api").lower()
-    if provider == "local_bge":
-        return _LocalBgeEmbedding()
-    if provider == "chroma_default":
-        return _ChromaDefaultEmbedding()
-    return _ApiEmbedding()
+    builders = {
+        "api": _ApiEmbedding,
+        "local_bge": _LocalBgeEmbedding,
+        "chroma_default": _ChromaDefaultEmbedding,
+    }
+    if provider not in builders:
+        raise ValueError(
+            f"未知的 EMBEDDING_PROVIDER: {provider}（可选：{', '.join(builders)}）"
+        )
+    try:
+        return builders[provider]()
+    except Exception as e:
+        hint = _PROVIDER_HINT.get(provider, "")
+        raise RuntimeError(
+            f"Embedding 后端 '{provider}' 初始化失败：{e}"
+            + (f" —— {hint}" if hint else "")
+        ) from e

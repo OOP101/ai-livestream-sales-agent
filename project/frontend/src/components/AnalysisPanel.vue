@@ -20,7 +20,7 @@
         <el-col :span="8">
           <div class="info-block">
             <div class="info-label">优先级</div>
-            <el-tag :type="priorityType" size="large">{{ analysis.priority }}</el-tag>
+            <el-tag :type="priorityType" size="large">{{ priorityLabel }}</el-tag>
           </div>
         </el-col>
       </el-row>
@@ -50,6 +50,7 @@ const tagTypeMap: Record<string, string> = { purchase: 'success', question: 'pri
 const sentimentEmojiMap: Record<string, string> = { positive: '😊', neutral: '😐', negative: '😞' }
 const sentimentLabelMap: Record<string, string> = { positive: '积极', neutral: '中性', negative: '消极' }
 const priorityTypeMap: Record<string, string> = { high: 'danger', medium: 'warning', low: 'info' }
+const priorityLabelMap: Record<string, string> = { high: '高优先级', medium: '中优先级', low: '低优先级' }
 
 const tagType = computed(() => tagTypeMap[props.analysis?.intent || 'other'] || 'info')
 const intentLabel = computed(() => labelMap[props.analysis?.intent || 'other'] || '其他')
@@ -61,6 +62,7 @@ const sentimentColor = computed(() => {
   return s === 'positive' ? '#67c23a' : s === 'negative' ? '#f56c6c' : '#e6a23c'
 })
 const priorityType = computed(() => priorityTypeMap[props.analysis?.priority || 'low'] || 'info')
+const priorityLabel = computed(() => priorityLabelMap[props.analysis?.priority || 'low'] || '低优先级')
 </script>
 
 <style scoped>

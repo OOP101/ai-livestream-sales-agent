@@ -43,7 +43,6 @@
               size="small"
               style="width: 100%"
               clearable
-              @change="onAnchorChange"
             >
               <el-option
                 v-for="a in anchors"
@@ -98,15 +97,15 @@
         </el-card>
       </el-col>
 
-      <!-- 右侧：分析和话术 -->
+      <!-- 右侧：分析和话术（按内容自适应高度，避免话术来源列表被裁切） -->
       <el-col :span="16" style="height: 100%">
-        <el-row :gutter="20" style="height: 50%">
-          <el-col :span="24" style="height: 100%">
+        <el-row :gutter="20">
+          <el-col :span="24">
             <AnalysisPanel :analysis="latestAnalysis" />
           </el-col>
         </el-row>
-        <el-row :gutter="20" style="height: 50%; margin-top: 20px">
-          <el-col :span="24" style="height: 100%">
+        <el-row :gutter="20" style="margin-top: 20px">
+          <el-col :span="24">
             <ScriptRecommend :analysis="latestAnalysis" />
           </el-col>
         </el-row>
@@ -141,7 +140,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useMainStore } from '@/stores'
 import { createAnchor, getDouyinLoginStatus, douyinLogin, syncDouyinFollowing, douyinLogout, startDanmakuCapture, stopDanmakuCapture, getCaptureStatus } from '@/api'
@@ -169,27 +168,34 @@ const syncLoading = ref(false)
 const cooldownSeconds = ref(0)
 let cooldownTimer: ReturnType<typeof setInterval> | null = null
 
+/** 同步关注列表后的一小时冷却（与后端 get_cooldown_remaining 的窗口一致） */
+const SYNC_COOLDOWN_SECONDS = 3600
+
 function formatCooldown(sec: number): string {
   const m = Math.floor(sec / 60)
   const s = sec % 60
   return `${m}分${s}秒`
 }
 
+/** 启动冷却倒计时（0 或负数直接不启动）；重复调用会重置，不会叠加多个定时器 */
+function startCooldown(seconds: number) {
+  if (cooldownTimer) { clearInterval(cooldownTimer); cooldownTimer = null }
+  cooldownSeconds.value = Math.max(0, seconds)
+  if (cooldownSeconds.value <= 0) return
+  cooldownTimer = setInterval(() => {
+    cooldownSeconds.value = Math.max(0, cooldownSeconds.value - 1)
+    if (cooldownSeconds.value <= 0 && cooldownTimer) {
+      clearInterval(cooldownTimer)
+      cooldownTimer = null
+    }
+  }, 1000)
+}
+
 async function checkDouyinStatus() {
   try {
     const s = await getDouyinLoginStatus()
     douyinLoggedIn.value = s.logged_in
-    cooldownSeconds.value = s.cooldown_seconds || 0
-    if (cooldownTimer) clearInterval(cooldownTimer)
-    if (cooldownSeconds.value > 0) {
-      cooldownTimer = setInterval(() => {
-        cooldownSeconds.value = Math.max(0, cooldownSeconds.value - 1)
-        if (cooldownSeconds.value <= 0 && cooldownTimer) {
-          clearInterval(cooldownTimer)
-          cooldownTimer = null
-        }
-      }, 1000)
-    }
+    startCooldown(s.cooldown_seconds || 0)
   } catch (e) {
     console.error(e)
   }
@@ -221,15 +227,7 @@ async function handleSyncFollowing() {
     ElMessage.success(`${res.message}，其中 ${liveCount} 个正在直播`)
     await store.loadAnchors()
     // 同步成功后启动 1 小时冷却
-    cooldownSeconds.value = 3600
-    if (cooldownTimer) clearInterval(cooldownTimer)
-    cooldownTimer = setInterval(() => {
-      cooldownSeconds.value = Math.max(0, cooldownSeconds.value - 1)
-      if (cooldownSeconds.value <= 0 && cooldownTimer) {
-        clearInterval(cooldownTimer)
-        cooldownTimer = null
-      }
-    }, 1000)
+    startCooldown(SYNC_COOLDOWN_SECONDS)
   } catch (e: any) {
     const detail = e?.response?.data?.detail || e.message
     if (detail && String(detail).includes('登录')) {
@@ -254,10 +252,6 @@ async function handleDouyinLogout() {
   } catch {
     // 用户取消
   }
-}
-
-function onAnchorChange() {
-  // selectedAnchorId 已通过 v-model 双向绑定更新
 }
 
 function getAnchorName(anchorId: number | null | undefined): string {
@@ -324,7 +318,11 @@ onMounted(async () => {
     const cap = await getCaptureStatus()
     capturing.value = cap.capturing
   } catch { /* 忽略 */ }
-  if (!store.isConnected) store.connect('default')
+  store.connect('default')
+})
+
+onUnmounted(() => {
+  if (cooldownTimer) { clearInterval(cooldownTimer); cooldownTimer = null }
 })
 </script>
 

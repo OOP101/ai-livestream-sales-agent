@@ -1,7 +1,7 @@
 # backend/routers/anchor.py
 """主播管理 API：保存主播名称、平台、直播间地址"""
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from sqlalchemy import select
 from models.database import Anchor, AsyncSessionLocal
@@ -9,16 +9,43 @@ from models.database import Anchor, AsyncSessionLocal
 router = APIRouter(prefix="/api/anchors", tags=["主播"])
 
 
+def _clean_name(v: Optional[str]) -> Optional[str]:
+    """去掉首尾空白；空白串视为未提供"""
+    if v is None:
+        return None
+    v = v.strip()
+    return v or None
+
+
 class AnchorCreate(BaseModel):
-    name: str = Field(..., description="主播名称")
-    platform: Optional[str] = "custom"
-    room_url: Optional[str] = Field(None, description="直播间地址")
+    name: str = Field(..., min_length=1, max_length=100, description="主播名称")
+    platform: Optional[str] = Field("custom", max_length=50)
+    room_url: Optional[str] = Field(None, max_length=500, description="直播间地址")
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            # 纯空白串能通过 min_length=1，必须额外拦掉，否则会写进空名主播
+            raise ValueError("主播名称不能为空")
+        return v
 
 
 class AnchorUpdate(BaseModel):
-    name: Optional[str] = None
-    platform: Optional[str] = None
-    room_url: Optional[str] = None
+    name: Optional[str] = Field(None, max_length=100)
+    platform: Optional[str] = Field(None, max_length=50)
+    room_url: Optional[str] = Field(None, max_length=500)
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            raise ValueError("主播名称不能为空")
+        return v
 
 
 def _serialize(a: Anchor) -> dict:
@@ -38,7 +65,7 @@ async def create_anchor(payload: AnchorCreate):
         anchor = Anchor(
             name=payload.name,
             platform=payload.platform or "custom",
-            room_url=payload.room_url,
+            room_url=_clean_name(payload.room_url),
         )
         db.add(anchor)
         await db.commit()
@@ -79,7 +106,7 @@ async def update_anchor(anchor_id: int, payload: AnchorUpdate):
         if payload.platform is not None:
             anchor.platform = payload.platform
         if payload.room_url is not None:
-            anchor.room_url = payload.room_url
+            anchor.room_url = _clean_name(payload.room_url)
         await db.commit()
         await db.refresh(anchor)
     return {"code": 0, "message": "已更新", "data": _serialize(anchor)}

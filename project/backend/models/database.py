@@ -1,9 +1,12 @@
 # backend/models/database.py
-from sqlalchemy import Column, Integer, String, Text, Float, DateTime, JSON, ForeignKey, Index
+import logging
+from sqlalchemy import Column, Integer, String, Text, Float, DateTime, JSON, ForeignKey, Index, update, func
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from datetime import datetime
 from core.config import settings
+
+logger = logging.getLogger(__name__)
 
 engine = create_async_engine(settings.DATABASE_URL, echo=settings.DEBUG)
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -126,3 +129,33 @@ async def get_session():
     """获取数据库会话"""
     async with AsyncSessionLocal() as session:
         yield session
+
+
+# 允许递增的计数字段白名单，字段名拼错时立刻报错而不是静默不生效
+_SESSION_COUNTERS = {
+    "total_danmaku": LiveSession.total_danmaku,
+    "total_analysis": LiveSession.total_analysis,
+}
+
+
+async def bump_session_counter(session_id: str, field: str, delta: int = 1) -> None:
+    """原子递增 live_sessions 的计数字段
+
+    用单条 `UPDATE ... SET col = COALESCE(col,0) + n` 完成，
+    避免「先读出来、加一、再写回」在并发下互相覆盖。
+    对应会话不存在时（例如 session_id="default"）静默跳过，不算错误。
+    """
+    column = _SESSION_COUNTERS.get(field)
+    if column is None:
+        raise ValueError(f"不支持的计数字段: {field}（可选：{', '.join(_SESSION_COUNTERS)}）")
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                update(LiveSession)
+                .where(LiveSession.session_id == session_id)
+                .values({column: func.coalesce(column, 0) + delta})
+            )
+            await db.commit()
+    except Exception:
+        # 计数是附属信息，失败不该影响主流程
+        logger.exception("会话计数更新失败（session_id=%s, field=%s）", session_id, field)

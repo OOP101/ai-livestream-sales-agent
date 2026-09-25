@@ -43,10 +43,13 @@ function resolveColor(k: string): string {
 }
 
 function renderChart() {
-  if (!chart || !props.data) return
-  const entries = Object.entries(props.data)
-  if (entries.length === 0) return
-
+  if (!chart) return
+  const entries = props.data ? Object.entries(props.data) : []
+  if (entries.length === 0) {
+    // 数据被清空时主动清图，否则会停留在上一次的旧分布上误导人
+    chart.clear()
+    return
+  }
   if (props.type === 'pie') {
     chart.setOption({
       tooltip: { trigger: 'item' },
@@ -73,14 +76,24 @@ function renderChart() {
   }
 }
 
+// resize 用具名 handler 注册，否则 onUnmounted 里无法移除，组件反复挂载会累积回调
+function handleResize() {
+  chart?.resize()
+}
+
 onMounted(() => {
-  chart = echarts.init(chartRef.value!)
+  if (!chartRef.value) return
+  chart = echarts.init(chartRef.value)
   renderChart()
-  window.addEventListener('resize', () => chart?.resize())
+  window.addEventListener('resize', handleResize)
 })
 
 watch(() => props.data, renderChart, { deep: true })
-onUnmounted(() => chart?.dispose())
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+  chart?.dispose()
+  chart = null
+})
 </script>
 
 <style scoped>

@@ -1,14 +1,17 @@
 # backend/routers/douyin.py
 """抖音集成 API：扫码登录、同步关注列表到主播表、直播间弹幕采集"""
 import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 from core.douyin_client import douyin_client, get_cooldown_remaining
 from core.langgraph_agent import livestream_agent
-from models.database import Anchor, DanmakuRecord, AsyncSessionLocal
-from routers.danmaku import manager, persist_analysis
+from models.database import Anchor, DanmakuRecord, AsyncSessionLocal, bump_session_counter
+from routers.danmaku import manager, persist_analysis, build_stats
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/douyin", tags=["抖音"])
 
@@ -153,33 +156,63 @@ async def logout():
 # ============ 直播间弹幕采集 ============
 
 async def _handle_captured_danmaku(session_id: str, anchor_id: int, user: str, content: str):
-    """处理采集到的直播间弹幕：落库 → AI 分析 → WebSocket 广播（与手动输入同一条管线）"""
-    # 落库
+    """处理采集到的直播间弹幕：落库 → AI 分析 → WebSocket 广播（与手动输入同一条管线）
+
+    这是"每条弹幕都要走"的热路径。三步各自隔离异常：任一步抛出都会沿调用栈
+    冒泡打断整个采集任务（表现为刚点开始采集就静默断掉），
+    因此这里失败只降级/跳过当前这一步，绝不向上抛。
+    """
+    # 1) 落库 —— 落库失败这条就没了，直接返回
     danmaku_id = None
-    async with AsyncSessionLocal() as db:
-        dm = DanmakuRecord(
-            session_id=session_id, anchor_id=anchor_id,
-            user_id=f"live_{user}", username=user, content=content,
-            danmaku_type="comment",
+    try:
+        async with AsyncSessionLocal() as db:
+            dm = DanmakuRecord(
+                session_id=session_id, anchor_id=anchor_id,
+                user_id=f"live_{user}", username=user, content=content,
+                danmaku_type="comment",
+            )
+            db.add(dm)
+            await db.commit()
+            danmaku_id = dm.id
+        await bump_session_counter(session_id, "total_danmaku")
+    except Exception as e:
+        logger.warning("直播间弹幕落库失败，跳过本条：%s", e)
+        return
+
+    # 2) AI 分析 —— 失败则降级为"只广播原文"，采集继续
+    result = None
+    try:
+        result = await livestream_agent.process_danmaku(
+            content=content, session_id=session_id,
+            user_info={"user_id": f"live_{user}", "username": user},
         )
-        db.add(dm)
-        await db.commit()
-        danmaku_id = dm.id
+    except Exception as e:
+        logger.warning("直播间弹幕 AI 分析失败，降级为仅广播原文：%s", e)
 
-    # AI 分析
-    result = await livestream_agent.process_danmaku(
-        content=content, session_id=session_id,
-        user_info={"user_id": f"live_{user}", "username": user},
-    )
-    await persist_analysis(session_id, danmaku_id, result, anchor_id=anchor_id)
+    if result is not None:
+        try:
+            await persist_analysis(session_id, danmaku_id, result, anchor_id=anchor_id)
+        except Exception as e:
+            logger.warning("分析结果落库失败（不影响前端展示）：%s", e)
 
-    # 广播给前端（前端弹幕列表 + 分析面板共用该消息）
-    await manager.broadcast({
-        "type": "analysis_result",
-        "danmaku": {"username": user, "content": content, "anchor_id": anchor_id},
-        "analysis": result,
-        "timestamp": datetime.now().isoformat(),
-    }, session_id)
+    # 3) 广播给前端（前端弹幕列表 + 分析面板共用该消息）
+    #    统计快照是附属信息，单独兜底，避免它算不出来把整条推送也拖掉
+    stats = None
+    try:
+        stats = await build_stats(session_id)
+    except Exception as e:
+        logger.warning("统计快照计算失败：%s", e)
+
+    try:
+        await manager.broadcast({
+            "type": "analysis_result",
+            "danmaku": {"username": user, "content": content, "anchor_id": anchor_id},
+            "analysis": result,
+            "stats": stats,
+            "timestamp": datetime.now().isoformat(),
+        }, session_id)
+    except Exception as e:
+        logger.warning("弹幕广播失败：%s", e)
 
 
 @router.post("/live/{anchor_id}/capture/start")

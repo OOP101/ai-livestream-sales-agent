@@ -61,7 +61,12 @@ async def list_sessions(limit: int = 50):
 
 @router.get("/{session_id}")
 async def get_session(session_id: str):
-    """获取单个会话详情（含弹幕与分析计数）"""
+    """获取单个会话详情（含弹幕与分析计数）
+
+    只读接口：实时计数直接覆盖在响应里返回，不回写数据库。
+    原先在这里 commit，会让并发读请求互相覆盖 total_* 字段；
+    计数器现在由写入侧（落库弹幕 / 落库分析结果）原子维护。
+    """
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(LiveSession).where(LiveSession.session_id == session_id)
@@ -70,7 +75,7 @@ async def get_session(session_id: str):
         if not session:
             raise HTTPException(status_code=404, detail="会话不存在")
 
-        # 实时统计弹幕与分析数量，避免缓存字段不准
+        # 实时统计，避免展示到滞后的缓存值
         danmaku_count = (await db.execute(
             select(func.count(DanmakuRecord.id)).where(DanmakuRecord.session_id == session_id)
         )).scalar() or 0
@@ -78,10 +83,11 @@ async def get_session(session_id: str):
             select(func.count(AnalysisResult.id)).where(AnalysisResult.session_id == session_id)
         )).scalar() or 0
 
-        session.total_danmaku = danmaku_count
-        session.total_analysis = analysis_count
-        await db.commit()
-    return {"code": 0, "data": _serialize(session)}
+        data = _serialize(session)
+
+    data["total_danmaku"] = danmaku_count
+    data["total_analysis"] = analysis_count
+    return {"code": 0, "data": data}
 
 
 @router.put("/{session_id}/end")
