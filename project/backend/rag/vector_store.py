@@ -61,7 +61,7 @@ class VectorStore:
     def clear(self) -> None:
         """清空整个集合。
 
-        重建索引前调用。仅靠内容寻址 ID 无法清理"源数据被删除后遗留的孤儿文档"，
+        重建索引前调用。仅靠内容寻址 ID 无法清理"源数据被删除后遗留的失效文档"，
         所以全量重建走 clear + add_documents。
         """
         self.client.delete_collection(name=settings.CHROMA_COLLECTION_NAME)

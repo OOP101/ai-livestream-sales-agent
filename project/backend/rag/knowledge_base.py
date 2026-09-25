@@ -43,7 +43,7 @@ class KnowledgeBase:
                 "metadata": {"category": script.get("category", "")}
             })
         # 3. 导入向量库
-        #    先清空再写入：源数据被删减时，仅靠内容寻址 ID 无法清理遗留的孤儿文档
+        #    先清空再写入：源数据被删减时，仅靠内容寻址 ID 无法清理遗留的失效文档
         if documents:
             vector_store.clear()
             vector_store.add_documents(documents)
